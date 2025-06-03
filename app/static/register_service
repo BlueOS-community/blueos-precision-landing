@@ -1,0 +1,10 @@
+{
+    "name": "Precision Landing",
+    "description": "BlueOS Extension to perform precision landing using an ethernet enabled camera gimbal.",
+    "icon": "mdi-bullseye-arrow",
+    "company": "ArduPilot",
+    "version": "0.0.1",
+    "new_page": false,
+    "webpage": "https://github.com/rmackay9/blueos-precision-landing",
+    "api": ""
+}

@@ -1,0 +1,16 @@
+[project]
+name = "blueos-precision-landing-extension"
+version = "0.0.1"
+description = "BlueOS Precision Landing Extension"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License (GPLv3)",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "requests",
+    "fastapi",
+    "uvicorn[standard]",
+    "opencv-python",
+    "apriltag"
+]
