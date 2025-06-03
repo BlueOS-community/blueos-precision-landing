@@ -1,0 +1,5 @@
+{
+    "files.trimTrailingWhitespace": true,
+    "editor.trimAutoWhitespace": true,
+    "files.eol": "\n"
+}
