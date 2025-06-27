@@ -206,13 +206,14 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
                 if opticalflow_result.get("success"):
                     # Send LANDING_TARGET message
                     send_result = mavlink_interface.send_optical_flow_msg(
+                        target_system_id,
                         opticalflow_result["flow_x"],
                         opticalflow_result["flow_y"],
-                        width,
-                        height,
-                        camera_hfov,
-                        camera_vfov,
-                        sysid=target_system_id
+                        0.0, 0.0,  # flow_comp_m_x, flow_comp_m_y
+                        255,  # quality
+                        -1,  # grond distance is unknown
+                        opticalflow_result["flow_x"],
+                        opticalflow_result["flow_y"]
                     )
 
                     if send_result["success"]:
