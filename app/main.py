@@ -27,7 +27,7 @@ from typing import Dict, Any
 from app import settings
 from app import image_capture
 from app import mavlink_interface
-from app import april_tags
+from app import opticalflow
 
 # Configure console logging
 console_handler = logging.StreamHandler(sys.stdout)
@@ -137,30 +137,60 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
         last_log_time = last_frame_time
         last_send_time = last_frame_time
         frame_count = 0
-        tag_count = 0
         sent_count = 0
 
         while precision_landing_running:
             try:
                 # Capture frame from RTSP stream
                 frame_result = image_capture.capture_frame_from_stream(rtsp_url)
+                capture_time = time.time()
 
                 if not frame_result["success"]:
                     logger.warning(f"{logging_prefix_str} failed to capture frame: {frame_result['message']}")
 
                     # if no frames captured in 10 seconds, restart the capture
-                    if time.time() - last_frame_time > 10:
+                    if capture_time - last_frame_time > 10:
                         logger.error(f"{logging_prefix_str} No frames captured in 10 seconds, restarting capture")
                         image_capture.cleanup_video_capture()
-                        last_frame_time = time.time()
+                        last_frame_time = capture_time
 
                     # Wait 0.01 seconds before retrying
                     await asyncio.sleep(0.01)
                     continue
 
                 # record success
-                last_frame_time = time.time()
+                last_frame_time = capture_time
                 frame_count += 1
+
+                # Check if we should use gimbal attitude and if gimbal is facing downward
+                # Defaults to sending flow values if gimbal attitude is unavailable
+                should_send_target = True
+                if use_gimbal_attitude:
+                    gimbal_result = mavlink_interface.get_gimbal_attitude(target_system_id)
+                    if gimbal_result["success"]:
+                        # Use quaternion to check if gimbal is facing downward within 10 degrees
+                        gimbal_attitude_dict = gimbal_result["quaternion"]
+                        # Convert dictionary format to array format [w, x, y, z]
+                        gimbal_attitude_q = [
+                            gimbal_attitude_dict["w"],
+                            gimbal_attitude_dict["x"],
+                            gimbal_attitude_dict["y"],
+                            gimbal_attitude_dict["z"]
+                        ]
+                        angle_diff_rad = angle_between_quaternions(gimbal_down_q, gimbal_attitude_q)
+                        angle_diff_deg = degrees(angle_diff_rad)
+                        logger.debug(f"{logging_prefix_str} Gimbal attitude angle_diff:{angle_diff_deg:.1f}°")
+                        if angle_diff_rad > radians(10):
+                            should_send_target = False
+                            logger.debug(f"{logging_prefix_str} Gimbal attitude angle_diff:{angle_diff_deg:.1f}° > 10°, skipping target")
+                    else:
+                        # If we can't get gimbal attitude but it's required, don't send target
+                        logger.warning(f"{logging_prefix_str} gimbal attitude unavailable, sending anyway")
+
+                # if not sending target sleep for 1 second
+                if not should_send_target:
+                    await asyncio.sleep(1)
+                    continue
 
                 # Get the captured frame
                 frame = frame_result["frame"]
@@ -171,88 +201,42 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
                 camera_vfov = calculate_vertical_fov(camera_hfov, width, height)
 
                 # Perform AprilTag detection (returns single detection with lowest ID)
-                april_tag_result = april_tags.detect_april_tags(
-                    frame,
-                    tag_family=settings.get_apriltag_family(),
-                    target_id=target_apriltag_id,
-                    include_augmented_image=False  # Don't need augmented image for precision landing
-                )
+                opticalflow_result = opticalflow.calc_opticalflow(frame, capture_time)
 
-                if april_tag_result.get("success") and april_tag_result.get("detection"):
-                    # Get the single detected tag (lowest ID)
-                    detected_tag = april_tag_result["detection"]
-                    tag_count += 1
+                if opticalflow_result.get("success"):
+                    # Send LANDING_TARGET message
+                    send_result = mavlink_interface.send_optical_flow_msg(
+                        opticalflow_result["flow_x"],
+                        opticalflow_result["flow_y"],
+                        width,
+                        height,
+                        camera_hfov,
+                        camera_vfov,
+                        sysid=target_system_id
+                    )
 
-                    # Check if we should use gimbal attitude and if gimbal is facing downward
-                    # Defaults to sending target if gimbal attitude is unavailable
-                    should_send_target = True
-                    if use_gimbal_attitude:
-                        gimbal_result = mavlink_interface.get_gimbal_attitude(target_system_id)
-                        if gimbal_result["success"]:
-                            # Use quaternion to check if gimbal is facing downward within 10 degrees
-                            gimbal_attitude_dict = gimbal_result["quaternion"]
-                            # Convert dictionary format to array format [w, x, y, z]
-                            gimbal_attitude_q = [
-                                gimbal_attitude_dict["w"],
-                                gimbal_attitude_dict["x"],
-                                gimbal_attitude_dict["y"],
-                                gimbal_attitude_dict["z"]
-                            ]
-                            angle_diff_rad = angle_between_quaternions(gimbal_down_q, gimbal_attitude_q)
-                            angle_diff_deg = degrees(angle_diff_rad)
-                            logger.debug(f"{logging_prefix_str} Gimbal attitude angle_diff:{angle_diff_deg:.1f}°")
-                            if angle_diff_rad > radians(10):
-                                should_send_target = False
-                                logger.debug(f"{logging_prefix_str} Gimbal attitude angle_diff:{angle_diff_deg:.1f}° > 10°, skipping target")
-                        else:
-                            # If we can't get gimbal attitude but it's required, don't send target
-                            logger.warning(f"{logging_prefix_str} gimbal attitude unavailable, sending anyway")
-
-                    if should_send_target:
-                        # Send LANDING_TARGET message
-                        send_result = mavlink_interface.send_landing_target(
-                            detected_tag["tag_id"],
-                            detected_tag["center_x"],
-                            detected_tag["center_y"],
-                            detected_tag["width"],
-                            detected_tag["height"],
-                            width,
-                            height,
-                            camera_hfov,
-                            camera_vfov,
-                            sysid=target_system_id
-                        )
-
-                        if send_result["success"]:
-                            sent_count += 1
-                            logger.debug(f"{logging_prefix_str} Frame:{frame_count} sent LANDING_TARGET for TagID:{detected_tag['tag_id']} "
-                                         f"(angle_x={send_result['angles']['angle_x_deg']:.2f}, "
-                                         f"angle_y={send_result['angles']['angle_y_deg']:.2f})")
-                        else:
-                            logger.warning(f"{logging_prefix_str} Failed to send LANDING_TARGET: {send_result['message']}")
-
-                        # record last send time
-                        last_send_time = time.time()
-
+                    if send_result["success"]:
+                        sent_count += 1
+                        logger.debug(f"{logging_prefix_str} Frame:{frame_count} sent OPTICAL_FLOW "
+                                        f"(flow_x={opticalflow_result["flow_x"]:.2f}, "
+                                        f"flow_y={opticalflow_result["flow_x"]:.2f})")
                     else:
-                        logger.debug(f"{logging_prefix_str} TagID:{detected_tag['tag_id']} detected but target not sent due to gimbal attitude")
+                        logger.warning(f"{logging_prefix_str} Failed to send OPTICAL_FLOW: {send_result['message']}")
+
+                    # record last send time
+                    last_send_time = time.time()
 
                 # log every 10 seconds
                 current_time = time.time()
                 if current_time - last_log_time > 10:
                     update_rate_hz = frame_count / (current_time - last_log_time)
-                    logger.info(f"{logging_prefix_str} rate:{update_rate_hz:.1f}hz frames:{frame_count} Tags:{tag_count} MsgsSent:{sent_count}")
+                    logger.info(f"{logging_prefix_str} rate:{update_rate_hz:.1f}hz frames:{frame_count} MsgsSent:{sent_count}")
                     last_log_time = current_time
                     frame_count = 0
-                    tag_count = 0
                     sent_count = 0
 
                 # sleep to reduce CPU load
-                # long sleep if tags not seen within 10 seconds
-                sleep_time = 0.01
-                if current_time - last_send_time > 10:
-                    sleep_time = 0.8
-                await asyncio.sleep(sleep_time)
+                await asyncio.sleep(0.01)
 
             except Exception as e:
                 logger.error(f"{logging_prefix_str} loop error {str(e)}")
