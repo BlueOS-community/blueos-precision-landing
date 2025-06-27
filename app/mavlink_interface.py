@@ -82,6 +82,28 @@ COMMAND_LONG_SET_MESSAGE_INTERVAL_TEMPLATE = """{{
   }}
 }}"""
 
+# OPTICAL_FLOW message template
+OPTICAL_FLOW_TEMPLATE = """{{
+  "header": {{
+    "system_id": {sysid},
+    "component_id": {component_id},
+    "sequence": 0
+  }},
+  "message": {{
+    "type": "OPTICAL_FLOW",
+    "time_usec": {time_usec},
+    "sensor_id": {sensor_id},
+    "flow_x": {flow_x},
+    "flow_y": {flow_y},
+    "flow_comp_m_x": {flow_comp_m_x},
+    "flow_comp_m_y": {flow_comp_m_y},
+    "quality": {quality},
+    "ground_distance": {ground_distance},
+    "flow_rate_x": {flow_rate_x},
+    "flow_rate_y": {flow_rate_y}
+  }}
+}}"""
+
 
 # send mavlink message using MAV2Rest
 def post_to_mav2rest(url: str, data: str) -> Optional[str]:
@@ -399,82 +421,75 @@ def send_landing_target_msg(angle_x: float,
 
 
 # Low level function to send OPTICAL_FLOW MAVLink message
-def send_optical_flow_msg(angle_x: float,
-                            angle_y: float,
-                            distance: float,
-                            size_x: float,
-                            size_y: float,
-                            target_num: int,
-                            sysid: int) -> Dict[str, Any]:
+def send_optical_flow_msg(sysid: int,
+                          flow_x: int,
+                          flow_y: int,
+                          flow_comp_m_x: float,
+                          flow_comp_m_y: float,
+                          quality: int,
+                          ground_distance: float,
+                          flow_rate_x: float,
+                          flow_rate_y: float) -> Dict[str, Any]:
     """
-    Send LANDING_TARGET MAVLink message
+    Send OPTICAL_FLOW MAVLink message
 
     Args:
-        angle_x: X-axis angular offset in radians
-        angle_y: Y-axis angular offset in radians
-        distance: Distance to target in meters (0 if unknown)
-        size_x: Size of target along x-axis in radians (0 if unknown)
-        size_y: Size of target along y-axis in radians (0 if unknown)
-        target_num: Target number (0 for standard landing target)
-        sysid: System ID to send message to
+        sysid: System ID to send message (normally 1)
+        flow_x: Flow in x-sensor direction in dpix
+        flow_y: Flow in y-sensor direction in dpiy
+        flow_comp_m_x: Flow in x-axis in ground plane in meters/second
+        flow_comp_m_y: Flow in y-axis in ground plane in meters/second
+        quality: Optical flow quality (0=bad, 255=maximum quality)
+        ground_distance: Ground distance in meters, negative if unknown
+        flow_rate_x: Flow rate about X axis in radians/second
+        flow_rate_y: Flow rate about Y axis in radians/second
 
     Returns:
         Dictionary with send results
     """
 
     # logging prefix for all messages from this function
-    logging_prefix_str = "send_landing_target_msg:"
+    logging_prefix_str = "send_optical_flow_msg:"
 
     try:
         # Get current time in microseconds since UNIX epoch
-        current_time = time.time()
-        time_usec = int(current_time * 1000000)
+        time_usec = int(time.time() * 1000000)
 
-        # Always use MAV_FRAME_LOCAL_FRD
-        frame_name = "LOCAL_FRD"
-
-        # Map position type integer to type name (always use VISION_FIDUCIAL)
-        position_type_name = "VISION_FIDUCIAL"
-
-        # Format the LANDING_TARGET message using BlueOS-style template
-        landing_target_data = LANDING_TARGET_TEMPLATE.format(
+        # Format the OPTICAL_FLOW message
+        optical_flow_data = OPTICAL_FLOW_TEMPLATE.format(
             sysid=sysid,
             component_id=MAV_COMP_ID_ONBOARD_COMPUTER,
             time_usec=time_usec,
-            target_num=target_num,
-            frame_name=frame_name,
-            angle_x=angle_x,
-            angle_y=angle_y,
-            distance=distance,
-            size_x=size_x,
-            size_y=size_y,
-            x=0.0,  # X Position of the landing target in MAV_FRAME (not used for angular)
-            y=0.0,  # Y Position of the landing target in MAV_FRAME (not used for angular)
-            z=0.0,  # Z Position of the landing target in MAV_FRAME (not used for angular)
-            q0=1.0,  # Quaternion of landing target orientation (not used)
-            q1=0.0,
-            q2=0.0,
-            q3=0.0,
-            position_type_name=position_type_name
+            sensor_id=0,
+            flow_x=flow_x,  # Flow in x-sensor direction in dpix
+            flow_y=flow_y,  # Flow in y-sensor direction in dpiy
+            flow_comp_m_x=flow_comp_m_x,  # Flow in x-sensor direction in m/s, angular-speed compensated
+            flow_comp_m_y=flow_comp_m_y,  # Flow in y-sensor direction in m/s, angular-speed compensated
+            quality=quality,  # Optical flow quality / confidence. 0: bad, 255: maximum quality
+            ground_distance=ground_distance,  # Ground distance. Positive value: distance known. Negative value: Unknown distance
+            flow_rate_x=flow_rate_x,  # Flow rate about X axis in radians/second
+            flow_rate_y=flow_rate_y   # Flow rate about Y axis in radians/second
         )
 
-        # Send message via MAV2Rest using BlueOS-style post
+        # Send message via MAV2Rest
         url = f"{MAV2REST_ENDPOINT}/mavlink"
-        response = post_to_mav2rest(url, landing_target_data)
+        response = post_to_mav2rest(url, optical_flow_data)
 
         if response is not None:
-            logger.debug(f"{logging_prefix_str} LANDING_TARGET sent with SysID {sysid} CompID {MAV_COMP_ID_ONBOARD_COMPUTER} angle_x={angle_x:.2f} rad, angle_y={angle_y:.2f} rad")
+            logger.debug(f"{logging_prefix_str} OPTICAL_FLOW sent with SysID {sysid} CompID {MAV_COMP_ID_ONBOARD_COMPUTER} flow_x={flow_x:.4f} rad/s, flow_y={flow_y:.4f} rad/s")
             return {
                 "success": True,
-                "message": f"LANDING_TARGET message sent successfully with SysID {sysid} CompID {MAV_COMP_ID_ONBOARD_COMPUTER}",
+                "message": f"OPTICAL_FLOW message sent successfully with SysID {sysid} CompID {MAV_COMP_ID_ONBOARD_COMPUTER}",
                 "time_usec": time_usec,
-                "angle_x": angle_x,
-                "angle_y": angle_y,
+                "flow_x": flow_x,
+                "flow_y": flow_y,
+                "quality": quality,
+                "ground_distance": ground_distance,
                 "sysid": sysid,
                 "response": response
             }
         else:
-            logger.error(f"{logging_prefix_str} failed to send LANDING_TARGET")
+            logger.error(f"{logging_prefix_str} failed to send OPTICAL_FLOW")
             return {
                 "success": False,
                 "message": "MAV2Rest returned no response",
