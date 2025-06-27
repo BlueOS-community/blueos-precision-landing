@@ -398,6 +398,98 @@ def send_landing_target_msg(angle_x: float,
         }
 
 
+# Low level function to send OPTICAL_FLOW MAVLink message
+def send_optical_flow_msg(angle_x: float,
+                            angle_y: float,
+                            distance: float,
+                            size_x: float,
+                            size_y: float,
+                            target_num: int,
+                            sysid: int) -> Dict[str, Any]:
+    """
+    Send LANDING_TARGET MAVLink message
+
+    Args:
+        angle_x: X-axis angular offset in radians
+        angle_y: Y-axis angular offset in radians
+        distance: Distance to target in meters (0 if unknown)
+        size_x: Size of target along x-axis in radians (0 if unknown)
+        size_y: Size of target along y-axis in radians (0 if unknown)
+        target_num: Target number (0 for standard landing target)
+        sysid: System ID to send message to
+
+    Returns:
+        Dictionary with send results
+    """
+
+    # logging prefix for all messages from this function
+    logging_prefix_str = "send_landing_target_msg:"
+
+    try:
+        # Get current time in microseconds since UNIX epoch
+        current_time = time.time()
+        time_usec = int(current_time * 1000000)
+
+        # Always use MAV_FRAME_LOCAL_FRD
+        frame_name = "LOCAL_FRD"
+
+        # Map position type integer to type name (always use VISION_FIDUCIAL)
+        position_type_name = "VISION_FIDUCIAL"
+
+        # Format the LANDING_TARGET message using BlueOS-style template
+        landing_target_data = LANDING_TARGET_TEMPLATE.format(
+            sysid=sysid,
+            component_id=MAV_COMP_ID_ONBOARD_COMPUTER,
+            time_usec=time_usec,
+            target_num=target_num,
+            frame_name=frame_name,
+            angle_x=angle_x,
+            angle_y=angle_y,
+            distance=distance,
+            size_x=size_x,
+            size_y=size_y,
+            x=0.0,  # X Position of the landing target in MAV_FRAME (not used for angular)
+            y=0.0,  # Y Position of the landing target in MAV_FRAME (not used for angular)
+            z=0.0,  # Z Position of the landing target in MAV_FRAME (not used for angular)
+            q0=1.0,  # Quaternion of landing target orientation (not used)
+            q1=0.0,
+            q2=0.0,
+            q3=0.0,
+            position_type_name=position_type_name
+        )
+
+        # Send message via MAV2Rest using BlueOS-style post
+        url = f"{MAV2REST_ENDPOINT}/mavlink"
+        response = post_to_mav2rest(url, landing_target_data)
+
+        if response is not None:
+            logger.debug(f"{logging_prefix_str} LANDING_TARGET sent with SysID {sysid} CompID {MAV_COMP_ID_ONBOARD_COMPUTER} angle_x={angle_x:.2f} rad, angle_y={angle_y:.2f} rad")
+            return {
+                "success": True,
+                "message": f"LANDING_TARGET message sent successfully with SysID {sysid} CompID {MAV_COMP_ID_ONBOARD_COMPUTER}",
+                "time_usec": time_usec,
+                "angle_x": angle_x,
+                "angle_y": angle_y,
+                "sysid": sysid,
+                "response": response
+            }
+        else:
+            logger.error(f"{logging_prefix_str} failed to send LANDING_TARGET")
+            return {
+                "success": False,
+                "message": "MAV2Rest returned no response",
+                "network_error": True
+            }
+
+    except Exception as e:
+        logger.error(f"{logging_prefix_str} unexpected error {str(e)}")
+        return {
+            "success": False,
+            "message": f"Unexpected error: {str(e)}",
+            "unexpected_error": True
+        }
+
+
 # Retrieve the latest GIMBAL_DEVICE_ATTITUDE_STATUS message via MAV2Rest
 def get_gimbal_attitude(sysid: int) -> Dict[str, Any]:
     """
