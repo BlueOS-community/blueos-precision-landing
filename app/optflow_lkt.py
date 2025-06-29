@@ -12,8 +12,16 @@ import logging
 from typing import Dict, Any
 import base64
 
+REV_FLOW = False
 # Get logger
 logger = logging.getLogger("optical-flow")
+
+def predict_next_frame(image: np.ndarray, flow: Dict[str, Any]) -> np.ndarray:
+    """
+    Predict the next frame features based on the current image and constant velocity model.
+    """
+
+    return
 
 def get_optical_flow(image: np.ndarray, prev_image: np.ndarray, include_augmented_image: bool) -> Dict[str, Any]:
     """
@@ -52,15 +60,18 @@ def get_optical_flow(image: np.ndarray, prev_image: np.ndarray, include_augmente
         feature_params = dict(maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7)
 
         # Create Lucas-Kanade optical flow parameters
-        lk_params = dict( winSize  = (15, 15),
-                  maxLevel = 2,
-                  criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+        criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)
+        flags = cv2.OPTFLOW_USE_INITIAL_FLOW
+
+        lk_params = dict( winSize  = (21, 21),
+                  maxLevel = 1, criteria = criteria)
 
         corners0 = cv2.goodFeaturesToTrack(
             gray_prev,
             mask=None,
             **feature_params
-        )
+        ) # TODO: Add initial guess for corners
+
         if corners0 is None or len(corners0) == 0:
             logger.warning(f"{logging_prefix_str} No corners detected in the previous image")
             return {
@@ -70,19 +81,29 @@ def get_optical_flow(image: np.ndarray, prev_image: np.ndarray, include_augmente
                 "image_base64": ""
             }
 
-        corner1, st, err = cv2.calcOpticalFlowPyrLK(
-            gray_prev, gray, corners0, None, **lk_params
-        )
+        corners1, st, err = cv2.calcOpticalFlowPyrLK(
+            gray_prev, gray, corners0, None, **lk_params)
 
-        # select only good points
-        if corner1 is not None:
-            good_new = corner1[st.ravel() == 1]
+        # Filter out points
+        total_succ = np.sum(st)
+
+        if total_succ < 10:
+            corners1, st, err = cv2.calcOpticalFlowPyrLK(gray_prev, gray, corners0, None, winSize=(21, 21), maxLevel=3)
+
+        if REV_FLOW:
+            rev_corners1, stRev, errRev = cv2.calcOpticalFlowPyrLK(
+                gray, gray_prev, corners1, corners0, winSize=(21, 21), maxLevel=1, criteria=criteria, flags=flags)
+
+            dist = np.linalg.norm(corners0 - rev_corners1, axis=1)
+            st = st & stRev * (dist <= 0.5)
+
+        if corners1 is not None:
+            good_new = corners1[st.ravel() == 1]
             good_old = corners0[st.ravel() == 1]
 
             # Calculate flow vectors
             flow_vectors = good_new - good_old
 
-            # flow_info dictionary to store additional information
             flow_info = {
                 "num_points": len(good_new),
                 "points": good_new.tolist(),
