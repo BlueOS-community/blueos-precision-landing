@@ -115,6 +115,7 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
             st = st & stRev * (dist <= 0.5)
 
         # Use of previous image complete, backup current image to previous
+        dt = capture_time - prev_image_time
         prev_image = curr_image_grey
         prev_image_time = capture_time
 
@@ -122,7 +123,27 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
         good_new = corners1[st.ravel() == 1]
         good_old = corners0[st.ravel() == 1]
         good_errors = err[st.ravel() == 1]
-        flow_vectors = good_new - good_old
+
+        # Sanity check shapes
+        if good_new.shape != good_old.shape or good_new.shape[0] == 0:
+            logger.error(f"{logging_prefix_str} Invalid points array shapes, new:{good_new.shape}, "
+                     f"old:{good_old.shape}, errors:{good_errors.shape}")
+            return {
+                "success": False,
+                "message": "Invalid points array shapes",
+                "flow_x" : None,
+                "flow_y" : None,
+                "dt": None,
+                "image_base64": None
+            }
+
+        # Compute flow vectors and reshape to (N, 2)
+        flow_vectors = (good_new - good_old).reshape(-1, 2)
+
+        # print out shape of flow vectors
+        logger.debug(f"{logging_prefix_str} good_new shape: {good_new.shape}, "
+                     f"good_old shape: {good_old.shape}, good_errors shape: {good_errors.shape}"
+                     f", flow_vectors shape: {flow_vectors.shape}")
 
         # Check if any points were successfully tracked
         if len(flow_vectors) == 0:
@@ -130,22 +151,6 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
             return {
                 "success": False,
                 "message": "No points successfully tracked",
-                "flow_x" : None,
-                "flow_y" : None,
-                "dt": None,
-                "image_base64": None
-            }
-
-        # Ensure flow_vectors has proper shape (N, 2)
-        if flow_vectors.ndim == 1:
-            flow_vectors = flow_vectors.reshape(1, -1)
-
-        # Ensure we have at least 2 columns (x, y coordinates)
-        if flow_vectors.shape[1] < 2:
-            logger.warning(f"{logging_prefix_str} Invalid flow_vectors shape: {flow_vectors.shape}")
-            return {
-                "success": False,
-                "message": f"Invalid flow vectors shape: {flow_vectors.shape}",
                 "flow_x" : None,
                 "flow_y" : None,
                 "dt": None,
@@ -178,7 +183,7 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
             "message": "Success",
             "flow_x": flow_x,
             "flow_y": flow_y,
-            "dt": (capture_time - prev_image_time).total_seconds(),
+            "dt": dt,
             "image_base64": image_base64
         }
 
