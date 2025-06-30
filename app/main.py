@@ -93,7 +93,7 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
         precision_landing_running = True
 
         # Get camera setting
-        camera_hfov = settings.get_camera_horizontal_fov(camera_type)
+        camera_hfov_deg = settings.get_camera_horizontal_fov(camera_type)
 
         # Get AprilTag target ID from settings
         target_apriltag_id = settings.get_apriltag_target_id()
@@ -108,7 +108,7 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
         tag_id_str = str(target_apriltag_id)
         if target_apriltag_id == -1:
             tag_id_str = "any"
-        logger.info(f"{logging_prefix_str} Camera type: {camera_type}, HFOV: {camera_hfov}, RTSP:{rtsp_url}, TagId:{tag_id_str}, SysId:{target_system_id}, UseGimbalAttitude:{use_gimbal_attitude}")
+        logger.info(f"{logging_prefix_str} Camera type: {camera_type}, HFOV: {camera_hfov_deg}, RTSP:{rtsp_url}, TagId:{tag_id_str}, SysId:{target_system_id}, UseGimbalAttitude:{use_gimbal_attitude}")
 
         # Test MAV2Rest connection by sending a test LANDING_TARGET message
         mav_test = mavlink_interface.send_landing_target_msg(
@@ -275,7 +275,7 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
         logger.info(f"{logging_prefix_str} stopped")
 
 
-# helper function to calculate the vertical FOV based on the horizontal FOV, image width, and height (in pixels)
+# helper function to calculate the vertical FOV in degrees based on the horizontal FOV, image width, and height (in pixels)
 def calculate_vertical_fov(hfov_deg: float, width: int, height: int) -> float:
     """Calculate vertical FOV based on horizontal FOV, image width, and height
        tan(vfov/2) = tan(hfov/2) * (height/width)
