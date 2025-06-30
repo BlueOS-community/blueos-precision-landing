@@ -197,35 +197,58 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
                 width = frame_result["width"]
                 height = frame_result["height"]
 
-                # calculate hfov
-                camera_vfov = calculate_vertical_fov(camera_hfov, width, height)
+                # Perform optical flow calculation
+                opticalflow_result = optflow_lkt.get_optical_flow(frame, capture_time, False)
 
-                # Perform AprilTag detection (returns single detection with lowest ID)
-                opticalflow_result = optflow_lkt.get_optical_flow(frame, capture_time)
+                # calculate hfov
+                camera_vfov_deg = calculate_vertical_fov(camera_hfov_deg, width, height)
 
                 if opticalflow_result.get("success"):
-                    # Send LANDING_TARGET message
+                    # Extract flow values
+                    flow_x = opticalflow_result.get("flow_x", 0.0)
+                    flow_y = opticalflow_result.get("flow_y", 0.0)
+                    dt = opticalflow_result.get("dt", 0.0)
+
+                    # Convert pixel flow to angular flow (radians/second)
+                    # Assuming a simple conversion based on camera FOV and frame rate
+                    pixels_per_radian_h = width / math.radians(camera_hfov_deg)
+                    pixels_per_radian_v = height / math.radians(camera_vfov_deg)
+
+                    if dt > 0:
+                        flow_rate_x = flow_x / (pixels_per_radian_h * dt)  # rad/s
+                        flow_rate_y = flow_y / (pixels_per_radian_v * dt)  # rad/s
+                    else:
+                        # Avoid division by zero
+                        flow_rate_x = 0.0
+                        flow_rate_y = 0.0
+
+                    logger.debug(f"{logging_prefix_str} Frame:{frame_count} sent OPTICAL_FLOW "
+                                    f"(flow_x={flow_rate_x:.4f} rad/s, flow_y={flow_rate_y:.4f} rad/s)")
+
+                    # Send OPTICAL_FLOW message
                     send_result = mavlink_interface.send_optical_flow_msg(
-                        target_system_id,
-                        opticalflow_result["flow_x"],
-                        opticalflow_result["flow_y"],
-                        0.0, 0.0,  # flow_comp_m_x, flow_comp_m_y
-                        255,  # quality
-                        -1,  # grond distance is unknown
-                        opticalflow_result["flow_x"],
-                        opticalflow_result["flow_y"]
+                        sysid=target_system_id,  # system ID of the target vehicle
+                        flow_x=0.0,            # flow_x as integer (not used)
+                        flow_y=0.0,            # flow_y as integer (not used)
+                        flow_comp_m_x=0.0,     # flow_comp_m_x (gimbaled camera so always zero)
+                        flow_comp_m_y=0.0,     # flow_comp_m_y (gimbaled camera so always zero)
+                        quality=255,           # quality (0 to 255, 255 means good quality)
+                        ground_distance=-1,    # ground distance is unknown
+                        flow_rate_x=flow_rate_x,  # flow rate in x direction (rad/s)
+                        flow_rate_y=flow_rate_y  # flow rate in y direction (rad/s)
                     )
 
                     if send_result["success"]:
                         sent_count += 1
                         logger.debug(f"{logging_prefix_str} Frame:{frame_count} sent OPTICAL_FLOW "
-                                        f"(flow_x={opticalflow_result["flow_x"]:.2f}, "
-                                        f"flow_y={opticalflow_result["flow_x"]:.2f})")
+                                     f"(flow_x={flow_rate_x:.4f} rad/s, flow_y={flow_rate_y:.4f} rad/s)")
                     else:
                         logger.warning(f"{logging_prefix_str} Failed to send OPTICAL_FLOW: {send_result['message']}")
 
                     # record last send time
                     last_send_time = time.time()
+                else:
+                    logger.debug(f"{logging_prefix_str} Optical flow calculation failed: {opticalflow_result.get('message', 'Unknown error')}")
 
                 # log every 10 seconds
                 current_time = time.time()
