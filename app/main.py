@@ -111,7 +111,6 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
         logger.info(f"{logging_prefix_str} Camera type: {camera_type}, HFOV: {camera_hfov_deg}, RTSP:{rtsp_url}, TagId:{tag_id_str}, SysId:{target_system_id}, UseGimbalAttitude:{use_gimbal_attitude}")
 
         # Test MAV2Rest connection by sending a test LANDING_TARGET message
-        """
         mav_test = mavlink_interface.send_landing_target_msg(
             angle_x=0.0,
             angle_y=0.0,
@@ -132,7 +131,6 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
             # request gimbal attitude status at 1hz
             mavlink_interface.request_gimbal_attitude_status(target_system_id, 1)
             logger.info(f"{logging_prefix_str} Requested GIMBAL_DEVICE_ATTITUDE_STATUS at 1hz")
-        """
 
         # Precision landing main loop
         last_frame_time = time.time()
@@ -166,7 +164,6 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
 
                 # Check if we should use gimbal attitude and if gimbal is facing downward
                 # Defaults to sending flow values if gimbal attitude is unavailable
-                """
                 should_send_target = True
                 if use_gimbal_attitude:
                     gimbal_result = mavlink_interface.get_gimbal_attitude(target_system_id)
@@ -194,7 +191,6 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
                 if not should_send_target:
                     await asyncio.sleep(1)
                     continue
-                """
 
                 # Get the captured frame
                 frame = frame_result["frame"]
@@ -230,7 +226,6 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
                                     f"(flow_x={flow_rate_x:.4f} rad/s, flow_y={flow_rate_y:.4f} rad/s) dt={dt:.4f}s")
 
                     # Send OPTICAL_FLOW message
-                    """
                     send_result = mavlink_interface.send_optical_flow_msg(
                         sysid=target_system_id,  # system ID of the target vehicle
                         flow_x=0.0,            # flow_x as integer (not used)
@@ -249,7 +244,6 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
                                      f"(flow_x={flow_rate_x:.4f} rad/s, flow_y={flow_rate_y:.4f} rad/s)")
                     else:
                         logger.warning(f"{logging_prefix_str} Failed to send OPTICAL_FLOW: {send_result['message']}")
-                    """
 
                     # record last send time
                     last_send_time = time.time()
