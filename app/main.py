@@ -227,7 +227,7 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
                         flow_rate_y = 0.0
 
                     logger.debug(f"{logging_prefix_str} Frame:{frame_count} sent OPTICAL_FLOW "
-                                    f"(flow_x={flow_rate_x:.4f} rad/s, flow_y={flow_rate_y:.4f} rad/s)")
+                                    f"(flow_x={flow_rate_x:.4f} rad/s, flow_y={flow_rate_y:.4f} rad/s) dt={dt:.4f}s")
 
                     # Send OPTICAL_FLOW message
                     """
