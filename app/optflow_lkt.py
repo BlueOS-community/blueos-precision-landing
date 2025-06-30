@@ -14,7 +14,7 @@ import base64
 
 REV_FLOW = False
 # Get logger
-logger = logging.getLogger("optical-flow")
+logger = logging.getLogger("precision-landing")
 
 # previous image
 prev_image: np.ndarray = None
