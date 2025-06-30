@@ -37,7 +37,7 @@ console_handler.setFormatter(console_formatter)
 
 # Create logger
 logger = logging.getLogger("precision-landing")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 logger.addHandler(console_handler)
 
 app = FastAPI()
