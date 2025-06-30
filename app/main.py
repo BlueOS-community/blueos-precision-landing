@@ -27,7 +27,7 @@ from typing import Dict, Any
 from app import settings
 from app import image_capture
 from app import mavlink_interface
-from app import opticalflow
+from app import optflow_lkt
 
 # Configure console logging
 console_handler = logging.StreamHandler(sys.stdout)
@@ -201,7 +201,7 @@ async def start_precision_landing_internal(camera_type: str, rtsp_url: str):
                 camera_vfov = calculate_vertical_fov(camera_hfov, width, height)
 
                 # Perform AprilTag detection (returns single detection with lowest ID)
-                opticalflow_result = opticalflow.calc_opticalflow(frame, capture_time)
+                opticalflow_result = optflow_lkt.get_optical_flow(frame, capture_time)
 
                 if opticalflow_result.get("success"):
                     # Send LANDING_TARGET message

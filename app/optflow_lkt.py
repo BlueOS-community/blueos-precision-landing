@@ -16,6 +16,10 @@ REV_FLOW = False
 # Get logger
 logger = logging.getLogger("optical-flow")
 
+# previous image
+prev_image: np.ndarray = None
+prev_image_time = None
+
 def predict_next_frame(image: np.ndarray, flow: Dict[str, Any]) -> np.ndarray:
     """
     Predict the next frame features based on the current image and constant velocity model.
@@ -23,7 +27,7 @@ def predict_next_frame(image: np.ndarray, flow: Dict[str, Any]) -> np.ndarray:
 
     return
 
-def get_optical_flow(image: np.ndarray, prev_image: np.ndarray, include_augmented_image: bool) -> Dict[str, Any]:
+def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_image: bool) -> Dict[str, Any]:
     """
     Estimate optical flow in the image using the Lucas-Kanade method and Shi-Tomasi corner detection.
 
@@ -44,17 +48,21 @@ def get_optical_flow(image: np.ndarray, prev_image: np.ndarray, include_augmente
     logging_prefix_str = "get_optical_flow:"
 
     try:
-        # Convert to grayscale for corner detection
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = image
+        # variables
+        global prev_image, prev_image_time
 
-        # Convert prev_image to grayscale for corner detection
-        if len(prev_image.shape) == 3:
-            gray_prev = cv2.cvtColor(prev_image, cv2.COLOR_BGR2GRAY)
+        # Convert to grayscale for corner detection
+        if len(curr_image.shape) == 3:
+            curr_image_grey = cv2.cvtColor(curr_image, cv2.COLOR_BGR2GRAY)
         else:
-            gray_prev = prev_image
+            curr_image_grey = curr_image
+
+        # Calculate dt
+        dt = capture_time - prev_image_time
+
+        # store current image as previous
+        prev_image = curr_image_grey
+        prev_image_time = capture_time
 
         # Create Shi-Tomasi corner detector parameters
         feature_params = dict(maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7)
@@ -67,7 +75,7 @@ def get_optical_flow(image: np.ndarray, prev_image: np.ndarray, include_augmente
                   maxLevel = 1, criteria = criteria)
 
         corners0 = cv2.goodFeaturesToTrack(
-            gray_prev,
+            prev_image,
             mask=None,
             **feature_params
         ) # TODO: Add initial guess for corners
@@ -82,17 +90,17 @@ def get_optical_flow(image: np.ndarray, prev_image: np.ndarray, include_augmente
             }
 
         corners1, st, err = cv2.calcOpticalFlowPyrLK(
-            gray_prev, gray, corners0, None, **lk_params)
+            prev_image, curr_image_grey, corners0, None, **lk_params)
 
         # Filter out points
         total_succ = np.sum(st)
 
         if total_succ < 10:
-            corners1, st, err = cv2.calcOpticalFlowPyrLK(gray_prev, gray, corners0, None, winSize=(21, 21), maxLevel=3)
+            corners1, st, err = cv2.calcOpticalFlowPyrLK(prev_image, curr_image_grey, corners0, None, winSize=(21, 21), maxLevel=3)
 
         if REV_FLOW:
             rev_corners1, stRev, errRev = cv2.calcOpticalFlowPyrLK(
-                gray, gray_prev, corners1, corners0, winSize=(21, 21), maxLevel=1, criteria=criteria, flags=flags)
+                curr_image_grey, prev_image, corners1, corners0, winSize=(21, 21), maxLevel=1, criteria=criteria, flags=flags)
 
             dist = np.linalg.norm(corners0 - rev_corners1, axis=1)
             st = st & stRev * (dist <= 0.5)
@@ -113,7 +121,7 @@ def get_optical_flow(image: np.ndarray, prev_image: np.ndarray, include_augmente
 
             image_base64 = ""
             if include_augmented_image:
-                augmented_image = image.copy()
+                augmented_image = curr_image.copy()
                 for i, (new, old) in enumerate(zip(good_new, good_old)):
                     a, b = new.ravel()
                     c, d = old.ravel()
