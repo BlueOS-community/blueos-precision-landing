@@ -39,9 +39,11 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
     Returns:
         Dictionary containing:
         - success: bool indicating if detection was successful
-        - flow: Optical flow vectors and other information
-        - image_base64: Base64 encoded image (augmented if include_augmented_image=True, original if False, empty if no image requested)
+        - flow_x: average flow value in x axis (None on failure)
+        - flow_y: average flow value in y axis (None on failure)
+        - dt: Time difference between current and previous image in seconds (None on failure)
         - message: Status message
+        - image_base64: Base64 encoded image, None if not requested or could not be generated
     """
 
     # logging prefix for all messages from this function
@@ -51,18 +53,29 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
         # variables
         global prev_image, prev_image_time
 
-        # Convert to grayscale for corner detection
+        # Convert new image to grayscale for corner detection
         if len(curr_image.shape) == 3:
             curr_image_grey = cv2.cvtColor(curr_image, cv2.COLOR_BGR2GRAY)
         else:
             curr_image_grey = curr_image
 
-        # Calculate dt
-        dt = capture_time - prev_image_time
+        # if no previous image, backup current image to previous and return failure
+        if prev_image is None:
 
-        # store current image as previous
-        prev_image = curr_image_grey
-        prev_image_time = capture_time
+            # backup current image to previous
+            prev_image = curr_image_grey
+            prev_image_time = capture_time
+
+            # log and return failure
+            logger.debug(f"{logging_prefix_str} No previous image available for optical flow calculation")
+            return {
+                "success": False,
+                "message": "No previous image available",
+                "flow_x" : None,
+                "flow_y" : None,
+                "dt": None,
+                "image_base64": None
+            }
 
         # Create Shi-Tomasi corner detector parameters
         feature_params = dict(maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7)
@@ -74,28 +87,24 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
         lk_params = dict( winSize  = (21, 21),
                   maxLevel = 1, criteria = criteria)
 
-        corners0 = cv2.goodFeaturesToTrack(
-            prev_image,
-            mask=None,
-            **feature_params
-        ) # TODO: Add initial guess for corners
-
+        # Detect corners in the previous image
+        corners0 = cv2.goodFeaturesToTrack(prev_image, mask=None,**feature_params) # TODO: Add initial guess for corners
         if corners0 is None or len(corners0) == 0:
             logger.warning(f"{logging_prefix_str} No corners detected in the previous image")
             return {
                 "success": False,
                 "message": "No corners detected in the previous image",
-                "flow": None,
-                "image_base64": ""
+                "flow_x" : None,
+                "flow_y" : None,
+                "dt": None,
+                "image_base64": None
             }
 
-        corners1, st, err = cv2.calcOpticalFlowPyrLK(
-            prev_image, curr_image_grey, corners0, None, **lk_params)
+        # Calculate optical flow using Lucas-Kanade method
+        corners1, st, err = cv2.calcOpticalFlowPyrLK(prev_image, curr_image_grey, corners0, None, **lk_params)
 
-        # Filter out points
-        total_succ = np.sum(st)
-
-        if total_succ < 10:
+        # Try again if less than 10 points were tracked
+        if np.sum(st) < 10:
             corners1, st, err = cv2.calcOpticalFlowPyrLK(prev_image, curr_image_grey, corners0, None, winSize=(21, 21), maxLevel=3)
 
         if REV_FLOW:
@@ -105,52 +114,81 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
             dist = np.linalg.norm(corners0 - rev_corners1, axis=1)
             st = st & stRev * (dist <= 0.5)
 
-        if corners1 is not None:
-            good_new = corners1[st.ravel() == 1]
-            good_old = corners0[st.ravel() == 1]
+        # Use of previous image complete, backup current image to previous
+        prev_image = curr_image_grey
+        prev_image_time = capture_time
 
-            # Calculate flow vectors
-            flow_vectors = good_new - good_old
+        # Calculate flow vectors for all tracked points
+        good_new = corners1[st.ravel() == 1]
+        good_old = corners0[st.ravel() == 1]
+        good_errors = err[st.ravel() == 1]
+        flow_vectors = good_new - good_old
 
-            flow_info = {
-                "num_points": len(good_new),
-                "points": good_new.tolist(),
-                "old_points": good_old.tolist(),
-                "flow_vectors": flow_vectors.tolist()
-            }
-
-            image_base64 = ""
-            if include_augmented_image:
-                augmented_image = curr_image.copy()
-                for i, (new, old) in enumerate(zip(good_new, good_old)):
-                    a, b = new.ravel()
-                    c, d = old.ravel()
-                    cv2.line(augmented_image, (a, b), (c, d), (0, 255, 0), 2)
-                    cv2.circle(augmented_image, (a, b), 5, (0, 0, 255), -1)
-
-                _, buffer = cv2.imencode('.jpg', augmented_image)
-                image_base64 = base64.b64encode(buffer).decode('utf-8')
-
-            return {
-                "success": True,
-                "flow": flow_info,
-                "image_base64": image_base64,
-                "message": f"Optical flow calculated for {len(good_new)} points"
-            }
-        else:
-            logger.warning(f"{logging_prefix_str} No good points found after optical flow calculation")
+        # Check if any points were successfully tracked
+        if len(flow_vectors) == 0:
+            logger.warning(f"{logging_prefix_str} No points successfully tracked")
             return {
                 "success": False,
-                "message": "No good points found after optical flow calculation",
-                "flow": None,
-                "image_base64": ""
+                "message": "No points successfully tracked",
+                "flow_x" : None,
+                "flow_y" : None,
+                "dt": None,
+                "image_base64": None
             }
+
+        # Ensure flow_vectors has proper shape (N, 2)
+        if flow_vectors.ndim == 1:
+            flow_vectors = flow_vectors.reshape(1, -1)
+
+        # Ensure we have at least 2 columns (x, y coordinates)
+        if flow_vectors.shape[1] < 2:
+            logger.warning(f"{logging_prefix_str} Invalid flow_vectors shape: {flow_vectors.shape}")
+            return {
+                "success": False,
+                "message": f"Invalid flow vectors shape: {flow_vectors.shape}",
+                "flow_x" : None,
+                "flow_y" : None,
+                "dt": None,
+                "image_base64": None
+            }
+
+        # Calculate weighted average flow rates in x and y axis
+        # Use inverse of error as weights (lower error = higher weight)
+        # Add small epsilon to avoid division by zero
+        weights = 1.0 / (good_errors.ravel() + 1e-6)
+        flow_x = np.average(flow_vectors[:, 0], weights=weights) if len(flow_vectors) > 0 else 0
+        flow_y = np.average(flow_vectors[:, 1], weights=weights) if len(flow_vectors) > 0 else 0
+
+        # Create augmented image
+        image_base64 = None
+        if include_augmented_image:
+            augmented_image = curr_image.copy()
+            for i, (new, old) in enumerate(zip(good_new, good_old)):
+                a, b = new.ravel()
+                c, d = old.ravel()
+                cv2.line(augmented_image, (a, b), (c, d), (0, 255, 0), 2)
+                cv2.circle(augmented_image, (a, b), 5, (0, 0, 255), -1)
+
+            _, buffer = cv2.imencode('.jpg', augmented_image)
+            image_base64 = base64.b64encode(buffer).decode('utf-8')
+
+        # return success
+        return {
+            "success": True,
+            "message": "Success",
+            "flow_x": flow_x,
+            "flow_y": flow_y,
+            "dt": (capture_time - prev_image_time).total_seconds(),
+            "image_base64": image_base64
+        }
 
     except Exception as e:
         logger.exception(f"Error during Optical Flow calculation: {str(e)}")
         return {
             "success": False,
             "message": f"Optical Flow calculation failed: {str(e)}",
-            "flow": None,
-            "image_base64": ""
+            "flow_x": flow_x,
+            "flow_y": flow_y,
+            "dt": None,
+            "image_base64": None
         }
