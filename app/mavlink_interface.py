@@ -461,8 +461,8 @@ def send_optical_flow_msg(sysid: int,
             component_id=MAV_COMP_ID_ONBOARD_COMPUTER,
             time_usec=time_usec,
             sensor_id=0,
-            flow_x=flow_x,  # Flow in x-sensor direction in dpix
-            flow_y=flow_y,  # Flow in y-sensor direction in dpiy
+            flow_x=int(flow_x),  # Flow in x-sensor direction in dpix
+            flow_y=int(flow_y),  # Flow in y-sensor direction in dpiy
             flow_comp_m_x=flow_comp_m_x,  # Flow in x-sensor direction in m/s, angular-speed compensated
             flow_comp_m_y=flow_comp_m_y,  # Flow in y-sensor direction in m/s, angular-speed compensated
             quality=quality,  # Optical flow quality / confidence. 0: bad, 255: maximum quality
@@ -476,13 +476,13 @@ def send_optical_flow_msg(sysid: int,
         response = post_to_mav2rest(url, optical_flow_data)
 
         if response is not None:
-            logger.debug(f"{logging_prefix_str} OPTICAL_FLOW sent with SysID {sysid} CompID {MAV_COMP_ID_ONBOARD_COMPUTER} flow_x={flow_x:.4f} rad/s, flow_y={flow_y:.4f} rad/s")
+            logger.debug(f"{logging_prefix_str} OPTICAL_FLOW sent with SysID {sysid} CompID {MAV_COMP_ID_ONBOARD_COMPUTER} flow_rate_x={flow_rate_x:.4f} rad/s, flow_rate_y={flow_rate_y:.4f} rad/s")
             return {
                 "success": True,
                 "message": f"OPTICAL_FLOW message sent successfully with SysID {sysid} CompID {MAV_COMP_ID_ONBOARD_COMPUTER}",
                 "time_usec": time_usec,
-                "flow_x": flow_x,
-                "flow_y": flow_y,
+                "flow_rate_x": flow_rate_x,
+                "flow_rate_y": flow_rate_y,
                 "quality": quality,
                 "ground_distance": ground_distance,
                 "sysid": sysid,
