@@ -12,7 +12,7 @@ import logging
 from typing import Dict, Any
 import base64
 
-REV_FLOW = False
+REV_FLOW = True  # Reverse flow calculation for additional filtering
 # Get logger
 logger = logging.getLogger("precision-landing")
 
@@ -20,12 +20,11 @@ logger = logging.getLogger("precision-landing")
 prev_image: np.ndarray = None
 prev_image_time = None
 
-def predict_next_frame(image: np.ndarray, flow: Dict[str, Any]) -> np.ndarray:
+def inBorder(corners: np.ndarray, width: int, height: int) -> bool:
     """
-    Predict the next frame features based on the current image and constant velocity model.
+    Check if points are within the image borders.
     """
-
-    return
+    return (corners[:, 0] >= 0) & (corners[:, 0] < width) & (corners[:, 1] >= 0) & (corners[:, 1] < height)
 
 def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_image: bool) -> Dict[str, Any]:
     """
@@ -49,6 +48,10 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
     # logging prefix for all messages from this function
     logging_prefix_str = "get_optical_flow:"
 
+    flow_x = None
+    flow_y = None
+    height, width = curr_image.shape[:2]
+    # logger.debug(f"{logging_prefix_str} Image dimensions: {width}x{height}")
     try:
         # variables
         global prev_image, prev_image_time
@@ -78,7 +81,7 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
             }
 
         # Create Shi-Tomasi corner detector parameters
-        feature_params = dict(maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7)
+        feature_params = dict(maxCorners=100, qualityLevel=0.01, minDistance=7, blockSize=7)
 
         # Create Lucas-Kanade optical flow parameters
         criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)
@@ -112,12 +115,16 @@ def get_optical_flow(curr_image: np.ndarray, capture_time, include_augmented_ima
                 curr_image_grey, prev_image, corners1, corners0, winSize=(21, 21), maxLevel=1, criteria=criteria, flags=flags)
 
             dist = np.linalg.norm(corners0 - rev_corners1, axis=1)
-            st = st & stRev * (dist <= 0.5)
+            st = st & stRev & (dist <= 0.5)
 
         # Use of previous image complete, backup current image to previous
         dt = capture_time - prev_image_time
         prev_image = curr_image_grey
         prev_image_time = capture_time
+
+        # Filter out points that are outside the image borders
+        mask = inBorder(corners1, width, height)
+        st[~mask] = 0
 
         # Calculate flow vectors for all tracked points
         good_new = corners1[st.ravel() == 1]
