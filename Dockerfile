@@ -1,4 +1,4 @@
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim-bookworm AS builder
 
 # Install build dependencies for OpenCV compilation
 RUN apt-get update && \
@@ -23,7 +23,7 @@ RUN python -m pip install /app --extra-index-url https://www.piwheels.org/simple
     python -m pip install opencv-python==4.10.0.84 --extra-index-url https://www.piwheels.org/simple
 
 # Final runtime stage
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # Install only runtime dependencies
 RUN apt-get update && \
